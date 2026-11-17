@@ -17,17 +17,8 @@ $page_title = "Questions: " . $exam['title'];
 $success = "";
 $error = "";
 
-if (isset($_GET['msg'])) {
-    if ($_GET['msg'] == 'deleted')
-        $success = "Question removed successfully!";
-    if ($_GET['msg'] == 'added')
-        $success = "Question added successfully!";
-    if ($_GET['msg'] == 'updated')
-        $success = "Question updated successfully!";
-    if ($_GET['msg'] == 'bulk_success') {
-        $count = (int) $_GET['count'];
-        $success = "$count questions uploaded successfully!";
-    }
+if (isset($_GET['msg']) && $_GET['msg'] == 'deleted') {
+    $success = "Question removed successfully!";
 }
 
 // Handle Add Question
@@ -66,8 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_question'])) {
 
     if ($stmt->execute()) {
         updateExamTotalMarks($conn, $exam_id);
-        header("Location: manage-questions.php?exam_id=$exam_id&msg=added");
-        exit();
+        $success = "Question added successfully!";
     } else {
         $error = "Error adding question: " . $conn->error;
     }
@@ -106,62 +96,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['edit_question'])) {
 
     if ($stmt->execute()) {
         updateExamTotalMarks($conn, $exam_id);
-        header("Location: manage-questions.php?exam_id=$exam_id&msg=updated");
-        exit();
+        $success = "Question updated successfully!";
     } else {
         $error = "Error updating question: " . $conn->error;
-    }
-}
-
-// Handle JSON Bulk Upload
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['json_bulk_upload'])) {
-    if (!empty($_FILES['json_file']['tmp_name'])) {
-        $json_data = file_get_contents($_FILES['json_file']['tmp_name']);
-        $questions_array = json_decode($json_data, true);
-
-        if (is_array($questions_array)) {
-            $count = 0;
-            foreach ($questions_array as $q) {
-                $q_text = mysqli_real_escape_string($conn, $q['question_text']);
-                $type = $q['type'] ?? $exam['type'];
-                $marks = (int) ($q['marks'] ?? 10);
-
-                if ($type === 'Coding') {
-                    $template = mysqli_real_escape_string($conn, $q['coding_template'] ?? '');
-                    $sql = "INSERT INTO questions (exam_id, question_text, type, coding_template, marks) VALUES (?, ?, 'Coding', ?, ?)";
-                    $stmt = $conn->prepare($sql);
-                    $stmt->bind_param("issi", $exam_id, $q_text, $template, $marks);
-                    if ($stmt->execute()) {
-                        $q_id = $conn->insert_id;
-                        $count++;
-                        if (isset($q['test_cases']) && is_array($q['test_cases'])) {
-                            foreach ($q['test_cases'] as $tc) {
-                                $input = mysqli_real_escape_string($conn, $tc['input'] ?? '');
-                                $output = mysqli_real_escape_string($conn, $tc['output'] ?? '');
-                                $is_hidden = (int) ($tc['is_hidden'] ?? 0);
-                                $conn->query("INSERT INTO question_test_cases (question_id, input, expected_output, is_hidden) VALUES ($q_id, '$input', '$output', $is_hidden)");
-                            }
-                        }
-                    }
-                } else {
-                    $opt_a = mysqli_real_escape_string($conn, $q['option_a'] ?? '');
-                    $opt_b = mysqli_real_escape_string($conn, $q['option_b'] ?? '');
-                    $opt_c = mysqli_real_escape_string($conn, $q['option_c'] ?? '');
-                    $opt_d = mysqli_real_escape_string($conn, $q['option_d'] ?? '');
-                    $correct = mysqli_real_escape_string($conn, $q['correct_option'] ?? '');
-
-                    $sql = "INSERT INTO questions (exam_id, question_text, type, option_a, option_b, option_c, option_d, correct_option, marks) 
-                            VALUES (?, ?, 'MCQ', ?, ?, ?, ?, ?, ?)";
-                    $stmt = $conn->prepare($sql);
-                    $stmt->bind_param("issssssi", $exam_id, $q_text, $opt_a, $opt_b, $opt_c, $opt_d, $correct, $marks);
-                    if ($stmt->execute())
-                        $count++;
-                }
-            }
-            updateExamTotalMarks($conn, $exam_id);
-            header("Location: manage-questions.php?exam_id=$exam_id&msg=bulk_success&count=$count");
-            exit();
-        }
     }
 }
 
@@ -199,139 +136,57 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['bulk_upload'])) {
     }
 
     if (!empty(trim($raw_text))) {
-        if ($exam['type'] === 'Coding') {
-            // --- NEW: LeetCode-style Coding Parser ---
-            // Split by number at start of line (e.g., "1. Addition", "2. Check Even") without consuming the number
-            $questions_blocks = preg_split('/^(?=\s*\d+\.\s+)/m', $raw_text, -1, PREG_SPLIT_NO_EMPTY);
+        // Pre-process text to standardize the "ANSWER :" spacing
+        $raw_text = preg_replace('/ANSWER\s*:\s*/i', 'ANSWER : ', $raw_text);
 
-            $count = 0;
-            foreach ($questions_blocks as $block) {
-                if (empty(trim($block)))
+        // Split based on the "ANSWER : X" string as the most reliable end-of-question marker
+        $ans_split = '/(?<=ANSWER\s:\s[A-D])\s*/i';
+        $questions_blocks = preg_split($ans_split, $raw_text);
+
+        // Fallback for numbered lists
+        if (count($questions_blocks) <= 1) {
+            $split_pattern = '/\n\s*(\d+\.|\?|(?=\b[a-d][\)\.]))/i';
+            $questions_blocks = preg_split($split_pattern, $raw_text);
+        }
+
+        $count = 0;
+        foreach ($questions_blocks as $block) {
+            if (empty(trim($block)))
+                continue;
+
+            $lines = explode("\n", trim($block));
+            $q_text = "";
+            $options = ['a' => '', 'b' => '', 'c' => '', 'd' => ''];
+            $correct = '';
+
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if (empty($line))
                     continue;
 
-                $q_text_raw = trim($block);
-                $marks = $default_marks;
-                $template = "// Write your code here\n";
-
-                // Extract Test Cases using Regex
-                // Matches "Input: ... \n Output: ..." optionally followed by Explanation
-                $testcases = [];
-                preg_match_all('/Input:\s*(.*?)\n\s*Output:\s*(.*?)(?=\n\s*(?:Explanation:|Example \d+:|$))/is', $q_text_raw, $matches, PREG_SET_ORDER);
-
-                if (empty($matches)) {
-                    // Fallback simpler match
-                    preg_match_all('/Input:\s*(.*?)\n\s*Output:\s*(.*?)\n/is', $q_text_raw . "\n", $matches, PREG_SET_ORDER);
-                }
-
-                foreach ($matches as $match) {
-                    $in = trim($match[1]);
-                    $out = trim($match[2]);
-
-                    // Clean up input like "num1 = 12, num2 = 5" -> "12 5"
-                    if (strpos($in, '=') !== false) {
-                        // Strip variable names and equal signs
-                        $in = preg_replace('/[a-zA-Z0-9_]+\s*=\s*/', '', $in);
-                        // Replace commas with spaces
-                        $in = str_replace(',', ' ', $in);
-                    }
-
-                    // Clean up output like "[20, 10]" -> "20 10" (common for array returns in these examples)
-                    if (preg_match('/^\[(.*)\]$/', $out, $arr_out)) {
-                        $out = str_replace(',', ' ', $arr_out[1]);
-                    }
-
-                    // Remove extra spaces
-                    $in = trim(preg_replace('/\s+/', ' ', $in));
-                    $out = trim(preg_replace('/\s+/', ' ', $out));
-
-                    if (!empty($in) || !empty($out)) {
-                        $testcases[] = ['in' => $in, 'out' => $out];
-                    }
-                }
-
-                if (!empty($q_text_raw)) {
-                    // Transform to Markdown-like format for better display
-                    $lines = explode("\n", $q_text_raw);
-                    // Extract title from first line, e.g. "1. Title"
-                    $first_line = trim($lines[0]);
-                    if (preg_match('/^\d+\.\s*(.*)/', $first_line, $m)) {
-                        $lines[0] = "### " . $m[1] . "\n";
-                    } else {
-                        $lines[0] = "### " . $first_line . "\n";
-                    }
-
-                    // Rejoin lines
-                    $q_text_formatted = implode("\n", $lines);
-
-                    $sql = "INSERT INTO questions (exam_id, question_text, type, coding_template, marks) VALUES (?, ?, 'Coding', ?, ?)";
-                    $stmt = $conn->prepare($sql);
-                    $stmt->bind_param("issi", $exam_id, $q_text_formatted, $template, $marks);
-                    if ($stmt->execute()) {
-                        $new_q_id = $conn->insert_id;
-                        $count++;
-
-                        foreach ($testcases as $tc) {
-                            $in_db = mysqli_real_escape_string($conn, $tc['in']);
-                            $out_db = mysqli_real_escape_string($conn, $tc['out']);
-                            $conn->query("INSERT INTO question_test_cases (question_id, input, expected_output) VALUES ($new_q_id, '$in_db', '$out_db')");
-                        }
+                if (preg_match('/^[a-d][\)\.]\s*(.*)/i', $line, $matches)) {
+                    $options[strtolower($line[0])] = $matches[1];
+                } elseif (preg_match('/ANSWER\s*:\s*([A-D])/i', $line, $matches)) {
+                    $correct = strtoupper($matches[1]);
+                } else {
+                    if (empty($options['a']) && empty($options['b']) && empty($options['c']) && empty($options['d']) && empty($correct)) {
+                        $q_text .= (empty($q_text) ? "" : " ") . $line;
                     }
                 }
             }
-        } else {
-            // --- Legacy: MCQ Parser ---
-            // Pre-process text to standardize the "ANSWER :" spacing
-            $raw_text = preg_replace('/ANSWER\s*:\s*/i', 'ANSWER : ', $raw_text);
 
-            // Split based on the "ANSWER : X" string as the most reliable end-of-question marker
-            $ans_split = '/(?<=ANSWER\s:\s[A-D])\s*/i';
-            $questions_blocks = preg_split($ans_split, $raw_text);
-
-            // Fallback for numbered lists
-            if (count($questions_blocks) <= 1) {
-                $split_pattern = '/\n\s*(\d+\.|\?|(?=\b[a-d][\)\.]))/i';
-                $questions_blocks = preg_split($split_pattern, $raw_text);
-            }
-
-            $count = 0;
-            foreach ($questions_blocks as $block) {
-                if (empty(trim($block)))
-                    continue;
-
-                $lines = explode("\n", trim($block));
-                $q_text = "";
-                $options = ['a' => '', 'b' => '', 'c' => '', 'd' => ''];
-                $correct = '';
-
-                foreach ($lines as $line) {
-                    $line = trim($line);
-                    if (empty($line))
-                        continue;
-
-                    if (preg_match('/^[a-d][\)\.]\s*(.*)/i', $line, $matches)) {
-                        $options[strtolower($line[0])] = $matches[1];
-                    } elseif (preg_match('/ANSWER\s*:\s*([A-D])/i', $line, $matches)) {
-                        $correct = strtoupper($matches[1]);
-                    } else {
-                        if (empty($options['a']) && empty($options['b']) && empty($options['c']) && empty($options['d']) && empty($correct)) {
-                            $q_text .= (empty($q_text) ? "" : " ") . $line;
-                        }
-                    }
-                }
-
-                if (!empty($q_text) && !empty($correct)) {
-                    $sql = "INSERT INTO questions (exam_id, question_text, type, option_a, option_b, option_c, option_d, correct_option, marks) 
-                            VALUES (?, ?, 'MCQ', ?, ?, ?, ?, ?, ?)";
-                    $stmt = $conn->prepare($sql);
-                    $stmt->bind_param("issssssi", $exam_id, $q_text, $options['a'], $options['b'], $options['c'], $options['d'], $correct, $default_marks);
-                    if ($stmt->execute())
-                        $count++;
-                }
+            if (!empty($q_text) && !empty($correct)) {
+                $sql = "INSERT INTO questions (exam_id, question_text, type, option_a, option_b, option_c, option_d, correct_option, marks) 
+                        VALUES (?, ?, 'MCQ', ?, ?, ?, ?, ?, ?)";
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param("issssssi", $exam_id, $q_text, $options['a'], $options['b'], $options['c'], $options['d'], $correct, $default_marks);
+                if ($stmt->execute())
+                    $count++;
             }
         }
         updateExamTotalMarks($conn, $exam_id);
-        header("Location: manage-questions.php?exam_id=$exam_id&msg=bulk_success&count=$count");
-        exit();
+        $success = "$count questions uploaded successfully!";
+        $exam = $conn->query("SELECT * FROM exams WHERE id = $exam_id")->fetch_assoc();
     }
 }
 
@@ -472,81 +327,82 @@ if (isset($_GET['edit'])) {
             </form>
         </div>
 
-        <!-- Bulk Upload Section -->
-        <div class="stat-card">
-            <h3 class="card-title"><i class="fas fa-file-import" style="margin-right:10px; color: #8b5cf6;"></i>Bulk
-                Upload (Paste Content)</h3>
-            <form action="" method="POST" enctype="multipart/form-data">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-                    <div class="form-group">
-                        <label>Default Marks</label>
-                        <input type="number" name="bulk_marks" class="form-control" value="1" placeholder="Marks per q">
+        <!-- Bulk Upload Section (Only for MCQ) -->
+        <?php if ($exam['type'] == 'MCQ'): ?>
+            <div class="stat-card">
+                <div class="card-title">Bulk Upload MCQs</div>
+                <form action="" method="POST" enctype="multipart/form-data">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                        <div class="form-group">
+                            <label>Default Marks</label>
+                            <input type="number" name="bulk_marks" class="form-control" value="1" placeholder="Marks per Q">
+                        </div>
+                        <div class="form-group">
+                            <label>Exam Duration (Min)</label>
+                            <input type="number" name="bulk_duration" class="form-control"
+                                value="<?php echo $exam['duration']; ?>" placeholder="Update duration">
+                        </div>
                     </div>
+
                     <div class="form-group">
-                        <label>Exam Duration (Min)</label>
-                        <input type="number" name="bulk_duration" class="form-control"
-                            value="<?php echo $exam['duration']; ?>" placeholder="Update duration">
+                        <label>Upload Document (Optional)</label>
+                        <input type="file" name="bulk_file" class="form-control" accept=".txt,.docx" style="padding: 8px;">
+                        <small style="color: var(--text-muted);">Supports .txt and .docx</small>
                     </div>
-                </div>
 
-                <div class="form-group">
-                    <label>Upload Document (Optional)</label>
-                    <input type="file" name="bulk_file" class="form-control" accept=".txt,.docx" style="padding: 8px;">
-                    <small style="color: var(--text-muted);">Supports .txt and .docx</small>
-                </div>
+                    <div class="form-group">
+                        <label>Or Paste Content</label>
+                        <textarea name="bulk_text" class="form-control" rows="8"
+                            placeholder="Paste your document content here if not uploading..."></textarea>
+                    </div>
 
-                <div class="form-group">
-                    <label>Paste Content</label>
-                    <textarea name="bulk_text" class="form-control" rows="10"
-                        placeholder="Paste your questions here..."></textarea>
-                </div>
+                    <button type="submit" name="bulk_upload" class="btn btn-primary"
+                        style="background: #8b5cf6; width: 100%; font-weight: bold;">
+                        <i class="fas fa-upload" style="margin-right: 8px;"></i> Upload Questions
+                    </button>
 
-                <button type="submit" name="bulk_upload" class="btn btn-primary"
-                    style="background: #8b5cf6; width: 100%; font-weight: bold; padding: 12px;">
-                    <i class="fas fa-upload" style="margin-right: 8px;"></i> Process Bulk Questions
-                </button>
-
-            </form>
-        </div>
+                    <div
+                        style="margin-top: 15px; font-size: 0.75rem; color: var(--text-muted); padding: 10px; background: #f8fafc; border-radius: 8px;">
+                        <strong>Format Helper:</strong><br>
+                        Question text?<br>
+                        a) Option 1 <br>
+                        b) Option 2 <br>
+                        ANSWER : A
+                    </div>
+                </form>
+            </div>
+        <?php else: ?>
+            <div class="stat-card"
+                style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;">
+                <i class="fas fa-code"
+                    style="font-size: 3rem; color: var(--primary-color); opacity: 0.2; margin-bottom: 15px;"></i>
+                <p>Bulk upload is available for MCQ exams.<br>For coding questions, please use the manual editor.</p>
+            </div>
+        <?php endif; ?>
     </div>
-</div>
 
-<!-- Questions List -->
-<div class="stat-card" style="overflow-x: auto; margin-top: 30px;">
-    <div class="card-title">Added Questions</div>
-    <table style="width: 100%; min-width: 800px; border-collapse: collapse;">
-        <thead>
-            <tr style="text-align: left; border-bottom: 2px solid var(--bg-color);">
-                <th style="padding: 15px 10px; width: 60%;">Question</th>
-                <th style="padding: 15px 10px; width: 15%;">Type</th>
-                <th style="padding: 15px 10px; width: 10%;">Marks</th>
-                <th style="padding: 15px 10px; width: 15%;">Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php
-            $questions = $conn->query("SELECT * FROM questions WHERE exam_id = $exam_id ORDER BY id ASC");
-            while ($row = $questions->fetch_assoc()) {
-                // Strip markdown headers and test case text for a cleaner preview
-                $clean_text = preg_replace('/^###\s*/m', '', $row['question_text']);
-                // Remove content after Example 1: or Input: for the preview
-                $clean_text = preg_replace('/(Example 1:|Input:).*/is', '', $clean_text);
-                $clean_text = trim($clean_text);
-
-                $preview = strlen($clean_text) > 80 ? substr($clean_text, 0, 80) . "..." : $clean_text;
-
-                $tc_display = "";
-                if ($row['type'] === 'Coding') {
-                    $q_id = $row['id'];
-                    $tc_count = $conn->query("SELECT COUNT(*) as total FROM question_test_cases WHERE question_id = $q_id")->fetch_assoc()['total'];
-                    $tc_display = " <br><small style='color: var(--secondary-color);'>($tc_count Test Cases)</small>";
-                }
-
-                echo "<tr style='border-bottom: 1px solid var(--bg-color);'>";
-                echo "<td style='padding: 15px 10px; word-break: break-word;'>$preview$tc_display</td>";
-                echo "<td style='padding: 15px 10px;'>{$row['type']}</td>";
-                echo "<td style='padding: 15px 10px;'>{$row['marks']}</td>";
-                echo "<td style='padding: 15px 10px;'>
+    <!-- Questions List -->
+    <div class="stat-card">
+        <div class="card-title">Added Questions</div>
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid var(--bg-color);">
+                    <th style="padding: 15px 0;">Question</th>
+                    <th>Type</th>
+                    <th>Marks</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php
+                $questions = $conn->query("SELECT * FROM questions WHERE exam_id = $exam_id ORDER BY id ASC");
+                while ($row = $questions->fetch_assoc()) {
+                    $preview = strlen($row['question_text']) > 80 ? substr($row['question_text'], 0, 80) . "..." : $row['question_text'];
+                    echo "<tr style='border-bottom: 1px solid var(--bg-color);'>";
+                    echo "<td style='padding: 15px 0;'>$preview</td>";
+                    echo "<td>{$row['type']}</td>";
+                    echo "<td>{$row['marks']}</td>";
+                    echo "<td>
                             <a href='?exam_id=$exam_id&edit={$row['id']}' 
                                style='color: var(--primary-color); text-decoration: none; margin-right: 20px;' 
                                title='Edit'>
@@ -560,11 +416,12 @@ if (isset($_GET['edit'])) {
                                <i class='fas fa-trash' style='pointer-events: none;'></i>
                             </button>
                           </td>";
-                echo "</tr>";
-            }
-            ?>
-        </tbody>
-    </table>
+                    echo "</tr>";
+                }
+                ?>
+            </tbody>
+        </table>
+    </div>
 </div>
 
 <script>

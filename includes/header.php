@@ -4,6 +4,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 require_once __DIR__ . '/db_connect.php';
+require_once __DIR__ . '/functions.php';
 $u_id = $_SESSION['user_id'] ?? 0;
 $theme_data = ['theme_color' => '#4F46E5', 'dark_mode' => 0];
 if ($u_id) {
@@ -33,8 +34,6 @@ if ($u_id) {
     <!-- Custom CSS -->
     <link rel="stylesheet" href="../assets/css/style.css">
     <link rel="stylesheet" href="../assets/css/dashboard.css">
-    <!-- Site-wide Dynamic JS -->
-    <script src="../assets/js/dynamic.js" defer></script>
 
     <style>
         :root {
@@ -98,10 +97,60 @@ if ($u_id) {
             background: var(--card-bg) !important;
             border-color: var(--border-color) !important;
         }
+
+        /* Toast Notifications */
+        #toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+        }
+        .toast {
+            background: white;
+            color: #1e293b;
+            padding: 16px 24px;
+            border-radius: 12px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-left: 4px solid var(--primary-color);
+            transform: translateX(120%);
+            transition: transform 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            min-width: 300px;
+        }
+        .toast.show { transform: translateX(0); }
+        .toast-success { border-left-color: #10b981; }
+        .toast-danger { border-left-color: #ef4444; }
+        .toast-warning { border-left-color: #f59e0b; }
     </style>
+    <script>
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            
+            const icon = type === 'success' ? 'fa-check-circle' : (type === 'danger' ? 'fa-exclamation-circle' : 'fa-info-circle');
+            
+            toast.innerHTML = `
+                <i class="fas ${icon}" style="font-size: 1.2rem;"></i>
+                <div style="font-weight: 600;">${message}</div>
+            `;
+            
+            container.appendChild(toast);
+            setTimeout(() => toast.classList.add('show'), 100);
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+    </script>
 </head>
 
 <body>
+    <div id="toast-container"></div>
     <div class="dashboard-container">
         <?php include __DIR__ . '/sidebar.php'; ?>
 
@@ -116,17 +165,18 @@ if ($u_id) {
                     <div class="user-profile">
                         <div class="user-info" style="text-align: right;">
                             <p style="font-weight: 500; font-size: 0.875rem; color: var(--text-main);">
-                                <?php echo $_SESSION['full_name']; ?>
+                                <?php echo htmlspecialchars($_SESSION['full_name'] ?? 'User'); ?>
                             </p>
                             <p
                                 style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">
-                                <?php echo $_SESSION['role']; ?>
+                                <?php echo htmlspecialchars($_SESSION['role'] ?? ''); ?>
                             </p>
                         </div>
                         <div class="user-avatar"
                             style="background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; font-size: 0.75rem;">
-                            <?php echo strtoupper(substr($_SESSION['full_name'], 0, 1)); ?>
+                            <?php echo strtoupper(substr($_SESSION['full_name'] ?? 'U', 0, 1)); ?>
                         </div>
                     </div>
                 </div>
             </header>
+            <?php displayFlashMessage(); ?>

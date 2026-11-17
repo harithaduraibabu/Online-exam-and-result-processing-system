@@ -5,11 +5,11 @@
 $host = 'localhost';
 $username = 'root';
 $password = ''; // Default XAMPP password is empty
-$dbname = 'examportal'; // Changed from exam-portal to simplify names
+$dbname = 'exam-portal'; // Updated to match user's DB name
 $port = 3307; // Updated port number
 
-// Establish connection without selecting a database first
-$conn = new mysqli($host, $username, $password, '', $port);
+// Establish connection
+$conn = new mysqli($host, $username, $password, $dbname, $port);
 
 // Check connection
 if ($conn->connect_error) {
@@ -19,10 +19,7 @@ if ($conn->connect_error) {
 // Create database if not exists
 $sql_create_db = "CREATE DATABASE IF NOT EXISTS `$dbname`";
 if ($conn->query($sql_create_db) === TRUE) {
-    // Select the database
-    if (!$conn->select_db($dbname)) {
-        die("Error selecting database: " . $conn->error);
-    }
+    $conn->select_db($dbname);
 } else {
     die("Error creating database: " . $conn->error);
 }

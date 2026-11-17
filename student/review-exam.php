@@ -175,8 +175,7 @@ include '../includes/header.php';
 <div class="questions-list">
     <?php
     // Fetch all questions for this exam
-    $q_sql = "SELECT q.*, sa.selected_option, sa.is_correct, sa.marks_obtained, sa.submitted_code,
-                     sa.passed_test_cases, sa.total_test_cases, sa.evaluation_status
+    $q_sql = "SELECT q.*, sa.selected_option, sa.is_correct, sa.marks_obtained, sa.submitted_code
               FROM questions q
               LEFT JOIN student_answers sa ON sa.question_id = q.id AND sa.submission_id = $submission_id
               WHERE q.exam_id = {$submission['exam_id']}
@@ -239,33 +238,6 @@ include '../includes/header.php';
                 </div>
             <?php else: // Coding Question ?>
                 <div style="margin-top: 15px;">
-                    <div
-                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; background: #f1f5f9; padding: 12px 20px; border-radius: 10px;">
-                        <div>
-                            <span style="font-size: 0.85rem; color: var(--text-muted); font-weight: 500;">Test Cases:</span>
-                            <span style="margin-left:8px; font-weight:700; color: var(--text-main);">
-                                Passed <?php echo $q['passed_test_cases'] ?? 0; ?> of <?php echo $q['total_test_cases'] ?? 0; ?>
-                            </span>
-                        </div>
-                        <?php if ($q['evaluation_status']): ?>
-                            <?php
-                            $status_color = '#ef4444'; // Wrong Answer
-                            $status_bg = 'rgba(239, 68, 68, 0.1)';
-                            if ($q['evaluation_status'] == 'Accepted') {
-                                $status_color = '#10b981';
-                                $status_bg = 'rgba(16, 185, 129, 0.1)';
-                            } elseif ($q['evaluation_status'] == 'Partial') {
-                                $status_color = '#f59e0b';
-                                $status_bg = 'rgba(245, 158, 11, 0.1)';
-                            }
-                            ?>
-                            <span
-                                style="background:<?php echo $status_bg; ?>; color:<?php echo $status_color; ?>; padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">
-                                <?php echo $q['evaluation_status']; ?>
-                            </span>
-                        <?php endif; ?>
-                    </div>
-
                     <label
                         style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 8px;">Your
                         Submission:</label>

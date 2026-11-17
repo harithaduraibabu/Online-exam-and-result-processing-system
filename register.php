@@ -34,7 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['register'])) {
         if ($check_result->num_rows > 0) {
             $error = "Email already registered.";
         } else {
-            $hashed_password = $password;
+            $hashed_password = password_hash($password, PASSWORD_DEFAULT);
             $role = 'student';
             $register_number = mysqli_real_escape_string($conn, $_POST['register_number'] ?? '');
             $degree = mysqli_real_escape_string($conn, $_POST['degree'] ?? '');
@@ -63,7 +63,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['register'])) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Register | Exam Portal</title>
     <link rel="stylesheet" href="assets/css/style.css">
-    <script src="assets/js/dynamic.js" defer></script>
     <style>
         /* Animated Background Blobs */
         .bg-blob {
@@ -166,22 +165,23 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['register'])) {
             <form action="" method="POST">
                 <div class="form-group">
                     <label>Full Name</label>
-                    <input type="text" name="full_name" class="form-control" required>
+                    <input type="text" name="full_name" class="form-control" placeholder="John Doe" required>
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                     <div class="form-group">
                         <label>Register Number</label>
-                        <input type="text" name="register_number" class="form-control" required>
+                        <input type="text" name="register_number" class="form-control" placeholder="23UESS0022"
+                            required>
                     </div>
                     <div class="form-group">
                         <label>Degree / Branch</label>
-                        <input type="text" name="degree" class="form-control" required>
+                        <input type="text" name="degree" class="form-control" placeholder="B.Tech - CSE" required>
                     </div>
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                     <div class="form-group">
                         <label>Batch</label>
-                        <input type="text" name="batch" class="form-control" required>
+                        <input type="text" name="batch" class="form-control" placeholder="2027" required>
                     </div>
                     <div class="form-group">
                         <label>College Name</label>
@@ -191,16 +191,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['register'])) {
                 </div>
                 <div class="form-group">
                     <label>Email Address</label>
-                    <input type="email" name="email" class="form-control" placeholder="name@gmail.com" required>
+                    <input type="email" name="email" class="form-control" placeholder="name@example.com" required>
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                     <div class="form-group">
                         <label>Password</label>
-                        <input type="password" name="password" class="form-control" required>
+                        <input type="password" name="password" class="form-control" placeholder="••••••••" required>
                     </div>
                     <div class="form-group">
                         <label>Confirm Password</label>
-                        <input type="password" name="confirm_password" class="form-control" required>
+                        <input type="password" name="confirm_password" class="form-control" placeholder="••••••••"
+                            required>
                     </div>
                 </div>
                 <button type="submit" name="register" class="btn btn-primary"

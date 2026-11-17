@@ -86,8 +86,6 @@
 .main-content {
     flex-grow: 1;
     margin-left: 280px;
-    width: calc(100% - 280px);
-    box-sizing: border-box;
     padding: 40px 50px;
     background-color: var(--bg-color);
     min-height: 100vh;

@@ -28,4 +28,34 @@ function updateExamTotalMarks($conn, $exam_id)
     }
     $conn->query("UPDATE exams SET total_marks = $total WHERE id = $exam_id");
 }
+
+/**
+ * Set a flash message
+ */
+function setFlashMessage($type, $message)
+{
+    if (session_status() === PHP_SESSION_NONE) session_start();
+    $_SESSION['flash'] = ['type' => $type, 'message' => $message];
+}
+
+/**
+ * Display flash message using the toast system
+ */
+function displayFlashMessage()
+{
+    if (session_status() === PHP_SESSION_NONE) session_start();
+    if (isset($_SESSION['flash'])) {
+        $type = $_SESSION['flash']['type'];
+        $message = $_SESSION['flash']['message'];
+        unset($_SESSION['flash']);
+        
+        $toastType = ($type == 'danger') ? 'danger' : (($type == 'warning') ? 'warning' : 'success');
+        
+        echo "<script>document.addEventListener('DOMContentLoaded', () => {
+            if (typeof showToast === 'function') {
+                showToast('" . addslashes($message) . "', '$toastType');
+            }
+        });</script>";
+    }
+}
 ?>

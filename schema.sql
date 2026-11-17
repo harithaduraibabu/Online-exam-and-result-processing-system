@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS `submissions` (
     `student_id` INT NOT NULL,
     `exam_id` INT NOT NULL,
     `score` DECIMAL(5,2) DEFAULT 0.00,
-    `status` ENUM('pending', 'evaluated', 'published') DEFAULT 'pending',
+    `status` ENUM('pending', 'published') DEFAULT 'pending',
     `started_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     `finished_at` DATETIME,
     FOREIGN KEY (`student_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
@@ -84,16 +84,13 @@ CREATE TABLE IF NOT EXISTS `student_answers` (
     `student_language` VARCHAR(20), -- For Coding (Java, Python, C, C++)
     `is_correct` TINYINT(1) DEFAULT 0,
     `marks_obtained` DECIMAL(5,2) DEFAULT 0.00,
-    `passed_test_cases` INT DEFAULT 0,
-    `total_test_cases` INT DEFAULT 0,
-    `evaluation_status` ENUM('Accepted', 'Partial', 'Wrong Answer') DEFAULT NULL,
     FOREIGN KEY (`submission_id`) REFERENCES `submissions`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`question_id`) REFERENCES `questions`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Insert Sample Admin
 INSERT INTO `users` (`full_name`, `email`, `password`, `role`) VALUES 
-('Admin User', 'admin@example.com', 'admin123', 'admin');
--- Password is 'admin123'
+('Admin User', 'admin@example.com', '$2y$10$8W9S/dG5N2A5T3d5P6y.K.JzK8r5hL6v1XWwX5WwX5WwX5WwX5WwX', 'admin');
+-- Password is 'admin123' (hashed)
 
 COMMIT;

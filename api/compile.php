@@ -32,20 +32,14 @@ curl_setopt_array($curl, [
         "X-RapidAPI-Key: $api_key",
         "Content-Type: application/json"
     ],
-    CURLOPT_SSL_VERIFYPEER => false, // Bypass SSL for local dev
-    CURLOPT_CONNECTTIMEOUT => 10,
-    CURLOPT_TIMEOUT => 30
 ]);
 
 $response = curl_exec($curl);
 $err = curl_error($curl);
-$http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
 curl_close($curl);
 
 if ($err) {
-    echo json_encode(["error" => "cURL Error: " . $err]);
-} elseif ($http_code >= 400) {
-    echo json_encode(["error" => "API Error (HTTP $http_code): " . $response]);
+    echo json_encode(["error" => "cURL Error #:" . $err]);
 } else {
     echo $response;
 }

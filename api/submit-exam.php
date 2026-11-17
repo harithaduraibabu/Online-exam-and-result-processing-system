@@ -19,7 +19,7 @@ if ($sub_query->num_rows == 0) {
 }
 $submission = $sub_query->fetch_assoc();
 
-if ($submission['status'] !== 'pending' && $submission['status'] !== null) {
+if ($submission['status'] !== null) {
     // Already evaluated
     header("Location: ../student/index.php?status=submitted");
     exit;
@@ -57,78 +57,68 @@ foreach ($answers as $ans) {
     $is_correct = 0;
     $marks_awarded = 0;
 
-    if ($q['type'] === 'MCQ') {
-        if ($ans['selected_option'] === $q['correct_option']) {
+    if ($ans['type'] === 'MCQ') {
+        if ($ans['answer_text'] === $q['correct_option']) {
             $is_correct = 1;
             $marks_awarded = $q['marks'];
         }
-    } else if ($q['type'] === 'Coding') {
+    } else if ($ans['type'] === 'Coding') {
         // Coding Evaluation via Judge0
         // Determine Language ID
-        $lang_name = strtolower($ans['student_language'] ?? '');
+        $lang_name = strtolower($ans['language']);
         $lang_id = 62; // Java default
         if (strpos($lang_name, 'python') !== false)
             $lang_id = 71;
-        elseif (strpos($lang_name, 'cpp') !== false || strpos($lang_name, 'c++') !== false)
+        if (strpos($lang_name, 'cpp') !== false || strpos($lang_name, 'c++') !== false)
             $lang_id = 54;
         elseif (strpos($lang_name, 'c') !== false && strpos($lang_name, 'cpp') === false)
             $lang_id = 50;
 
-        $source_code = $ans['submitted_code'];
+        $source_code = $ans['answer_text'];
 
-        // Evaluate against test cases
+        // Evaluate against 3 test cases
         $tests_passed = 0;
         $total_tests = 0;
 
-        $host = "ce.judge0.com"; // Free public cluster
+        $api_key = "d39b6c6fd4msh7482ff03b540eedp1dd22ejsnd39c49f9a787";
+        $host = "judge0-ce.p.rapidapi.com";
 
-        // Try new test case table first
-        $tc_res = $conn->query("SELECT * FROM question_test_cases WHERE question_id = $q_id");
-        $all_test_cases = [];
-        if ($tc_res && $tc_res->num_rows > 0) {
-            while ($tc = $tc_res->fetch_assoc()) {
-                $all_test_cases[] = ['in' => $tc['input'], 'out' => $tc['expected_output']];
-            }
-        } else {
-            // Fallback to legacy 3 test case columns
-            for ($i = 1; $i <= 3; $i++) {
-                if (!empty(trim($q["test_case_{$i}_output"] ?? ''))) {
-                    $all_test_cases[] = ['in' => $q["test_case_{$i}_input"], 'out' => $q["test_case_{$i}_output"]];
-                }
-            }
-        }
+        for ($i = 1; $i <= 3; $i++) {
+            $db_in = $q["test_case_{$i}_input"];
+            $db_out = $q["test_case_{$i}_output"];
 
-        foreach ($all_test_cases as $tc) {
-            $db_in = $tc['in'];
-            $db_out = $tc['out'];
-            $total_tests++;
+            // Only evaluate if test case is defined
+            if (!empty(trim($db_out))) {
+                $total_tests++;
 
-            // Call Judge0
-            $curl = curl_init();
-            curl_setopt_array($curl, [
-                CURLOPT_URL => "https://$host/submissions?base64_encoded=false&wait=true",
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_FOLLOWLOCATION => true,
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => json_encode([
-                    "language_id" => $lang_id,
-                    "source_code" => $source_code,
-                    "stdin" => trim($db_in),
-                    "expected_output" => trim($db_out)
-                ]),
-                CURLOPT_HTTPHEADER => [
-                    "Content-Type: application/json"
-                ],
-                CURLOPT_SSL_VERIFYPEER => false
-            ]);
+                // Call Judge0
+                $curl = curl_init();
+                curl_setopt_array($curl, [
+                    CURLOPT_URL => "https://$host/submissions?base64_encoded=false&wait=true",
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_POST => true,
+                    CURLOPT_POSTFIELDS => json_encode([
+                        "language_id" => $lang_id,
+                        "source_code" => $source_code,
+                        "stdin" => trim($db_in),
+                        "expected_output" => trim($db_out)
+                    ]),
+                    CURLOPT_HTTPHEADER => [
+                        "X-RapidAPI-Host: $host",
+                        "X-RapidAPI-Key: $api_key",
+                        "Content-Type: application/json"
+                    ],
+                ]);
 
-            $response = curl_exec($curl);
-            curl_close($curl);
+                $response = curl_exec($curl);
+                curl_close($curl);
 
-            if ($response) {
-                $json_res = json_decode($response, true);
-                if (isset($json_res['status']['id']) && $json_res['status']['id'] == 3) {
-                    $tests_passed++;
+                if ($response) {
+                    $json_res = json_decode($response, true);
+                    // status id 3 means Accepted
+                    if (isset($json_res['status']['id']) && $json_res['status']['id'] == 3) {
+                        $tests_passed++;
+                    }
                 }
             }
         }
@@ -136,29 +126,15 @@ foreach ($answers as $ans) {
         if ($total_tests > 0) {
             $ratio = $tests_passed / $total_tests;
             $marks_awarded = round($ratio * $q['marks'], 2);
-
-            if ($tests_passed == $total_tests) {
-                $status = 'Accepted';
-            } elseif ($tests_passed > 0) {
-                $status = 'Partial';
-            } else {
-                $status = 'Wrong Answer';
-            }
-        } else {
-            $status = 'Wrong Answer';
+            $is_correct = ($tests_passed == $total_tests) ? 1 : 0;
         }
     }
 
     $total_score += $marks_awarded;
 
-    // Update individual answer with professional evaluation data
-    if ($q['type'] === 'Coding') {
-        $stmt = $conn->prepare("UPDATE student_answers SET is_correct = ?, marks_obtained = ?, passed_test_cases = ?, total_test_cases = ?, evaluation_status = ? WHERE id = ?");
-        $stmt->bind_param("idiisi", $is_correct, $marks_awarded, $tests_passed, $total_tests, $status, $ans_id);
-    } else {
-        $stmt = $conn->prepare("UPDATE student_answers SET is_correct = ?, marks_obtained = ? WHERE id = ?");
-        $stmt->bind_param("idi", $is_correct, $marks_awarded, $ans_id);
-    }
+    // Update individual answer
+    $stmt = $conn->prepare("UPDATE student_answers SET is_correct = ?, marks_obtained = ? WHERE id = ?");
+    $stmt->bind_param("idi", $is_correct, $marks_awarded, $ans_id);
     $stmt->execute();
 }
 

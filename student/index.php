@@ -8,7 +8,8 @@ $page_title = "Student Dashboard";
 $student_id = $_SESSION['user_id'];
 
 // Stats
-$user_data = $conn->query("SELECT * FROM users WHERE id = $student_id")->fetch_assoc();
+$user_res = $conn->query("SELECT * FROM users WHERE id = $student_id");
+$user_data = ($user_res && $user_res->num_rows > 0) ? $user_res->fetch_assoc() : [];
 $exams_taken = $conn->query("SELECT COUNT(*) as total FROM submissions WHERE student_id = $student_id")->fetch_assoc()['total'];
 $published_results = $conn->query("SELECT COUNT(*) as total FROM submissions WHERE student_id = $student_id AND status = 'published'")->fetch_assoc()['total'];
 
@@ -26,16 +27,48 @@ $active_exams = $conn->query("
 
 // Get Recent Results
 $recent_results = $conn->query("
-    SELECT s.id, s.score, s.started_at, e.title, e.total_marks
+    SELECT s.id, s.score, s.started_at, s.status, e.title, e.total_marks
     FROM submissions s
     JOIN exams e ON s.exam_id = e.id
-    WHERE s.student_id = $student_id AND s.status = 'published'
+    WHERE s.student_id = $student_id AND (s.status = 'published' OR s.status = 'evaluated')
     ORDER BY s.finished_at DESC
     LIMIT 3
 ");
 
+// Upcoming Exams for Notice Board
+$upcoming_exams = $conn->query("
+    SELECT * FROM exams 
+    WHERE status = 'active' 
+    AND start_date > NOW() 
+    ORDER BY start_date ASC 
+    LIMIT 3
+");
+
 include '../includes/header.php';
+displayFlashMessage();
 ?>
+
+<!-- Notice Board Section -->
+<?php if ($upcoming_exams->num_rows > 0): ?>
+    <div class="notice-board" style="margin-bottom: 30px; background: linear-gradient(135deg, #fff 0%, #f0fdf4 100%); border-left: 5px solid #16a34a; padding: 20px; border-radius: 12px; box-shadow: var(--shadow-sm);">
+        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
+            <div style="width: 40px; height: 40px; background: #dcfce7; color: #16a34a; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                <i class="fas fa-bullhorn"></i>
+            </div>
+            <h3 style="margin: 0; font-size: 1.25rem; font-weight: 700; color: #1e293b;">Upcoming Assessments</h3>
+        </div>
+        <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+            <?php while ($exam = $upcoming_exams->fetch_assoc()): ?>
+                <div class="notice-item" style="flex: 1; min-width: 250px; background: white; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0;">
+                    <div style="font-weight: 700; color: var(--primary-color); margin-bottom: 5px;"><?php echo htmlspecialchars($exam['title']); ?></div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">
+                        <i class="far fa-calendar-alt"></i> Starts: <?php echo date('M d, h:i A', strtotime($exam['start_date'])); ?>
+                    </div>
+                </div>
+            <?php endwhile; ?>
+        </div>
+    </div>
+<?php endif; ?>
 
 <!-- Profile Header Banner -->
 <div class="stat-card" style="padding: 0; overflow: hidden; margin-bottom: 30px; border-radius: 16px;">
@@ -59,10 +92,10 @@ include '../includes/header.php';
             </div>
             <div style="padding-bottom: 10px; flex-grow: 1;">
                 <h2 style="font-size: 1.8rem; font-weight: 800; color: var(--text-main); margin-bottom: 4px;">
-                    <?php echo htmlspecialchars($user_data['full_name']); ?>
+                    <?php echo htmlspecialchars($user_data['full_name'] ?? $_SESSION['full_name'] ?? 'Student'); ?>
                 </h2>
                 <p style="color: #ffffff; font-weight: 600; margin-bottom: 15px;">
-                    <?php echo htmlspecialchars($user_data['email']); ?>
+                    <?php echo htmlspecialchars($user_data['email'] ?? $_SESSION['email'] ?? ''); ?>
                 </p>
 
                 <div
@@ -105,18 +138,15 @@ include '../includes/header.php';
 
 <div class="stats-grid">
     <div class="stat-card">
-        <div class="stat-title"><i class="fas fa-check-circle"
-                style="color: var(--secondary-color); margin-right: 8px;"></i> Exams Completed</div>
+        <div class="stat-title"><i class="fas fa-check-circle" style="color: var(--secondary-color); margin-right: 8px;"></i> Exams Completed</div>
         <div class="stat-value"><?php echo $exams_taken; ?></div>
     </div>
     <div class="stat-card">
-        <div class="stat-title"><i class="fas fa-chart-line" style="color: var(--accent-color); margin-right: 8px;"></i>
-            Results Published</div>
+        <div class="stat-title"><i class="fas fa-chart-line" style="color: var(--accent-color); margin-right: 8px;"></i> Results Published</div>
         <div class="stat-value"><?php echo $published_results; ?></div>
     </div>
     <div class="stat-card">
-        <div class="stat-title"><i class="fas fa-calendar-alt" style="color: var(--warning); margin-right: 8px;"></i>
-            Pending Assessments</div>
+        <div class="stat-title"><i class="fas fa-calendar-alt" style="color: var(--warning); margin-right: 8px;"></i> Pending Assessments</div>
         <div class="stat-value"><?php echo $active_exams->num_rows; ?></div>
     </div>
 </div>
@@ -149,10 +179,18 @@ include '../includes/header.php';
                             / <?php echo $res['total_marks']; ?></span>
                     </div>
                 </div>
-                <a href="review-exam.php?submission_id=<?php echo $res['id']; ?>" class="btn"
-                    style="width: 100%; background: var(--bg-color); color: var(--primary-color); text-decoration: none; text-align: center; padding: 10px; font-size: 0.9rem; font-weight: 600; border: 1px solid var(--border-color); display: block;">
-                    View Detailed Review
-                </a>
+                <div style="display: flex; gap: 10px;">
+                    <a href="review-exam.php?submission_id=<?php echo $res['id']; ?>" class="btn"
+                        style="flex: 1; background: var(--bg-color); color: var(--primary-color); text-decoration: none; text-align: center; padding: 10px; font-size: 0.9rem; font-weight: 600; border: 1px solid var(--border-color); display: block; border-radius: 8px;">
+                        Review
+                    </a>
+                    <?php if ($res['status'] == 'published' || $res['status'] == 'evaluated'): ?>
+                    <a href="certificate.php?submission_id=<?php echo $res['id']; ?>" target="_blank" class="btn"
+                        style="flex: 1; background: #fef3c7; color: #92400e; text-decoration: none; text-align: center; padding: 10px; font-size: 0.9rem; font-weight: 600; border: 1px solid #fde68a; display: block; border-radius: 8px;">
+                        <i class="fas fa-certificate"></i> Certificate
+                    </a>
+                    <?php endif; ?>
+                </div>
             </div>
         <?php endwhile; ?>
     <?php else: ?>

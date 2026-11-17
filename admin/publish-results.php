@@ -12,7 +12,7 @@ if (isset($_GET['publish_exam'])) {
     $exam_id = (int) $_GET['publish_exam'];
 
     // Auto-calculate MCQ scores first
-    $subs = $conn->query("SELECT s.id, s.exam_id FROM submissions s WHERE s.exam_id = $exam_id AND s.status IN ('pending', 'evaluated')");
+    $subs = $conn->query("SELECT s.id, s.exam_id FROM submissions s WHERE s.exam_id = $exam_id AND s.status = 'pending'");
     while ($s = $subs->fetch_assoc()) {
         $sub_id = $s['id']; // Fix: Define sub_id correctly inside the loop
 
@@ -37,8 +37,8 @@ if (isset($_GET['publish_exam'])) {
 if (isset($_GET['publish_submission'])) {
     $sub_id = (int) $_GET['publish_submission'];
 
-    // Fetch submission to verify it exists and is actionable
-    $check = $conn->query("SELECT id FROM submissions WHERE id = $sub_id AND status IN ('pending', 'evaluated')");
+    // Fetch submission to verify it exists and is pending
+    $check = $conn->query("SELECT id FROM submissions WHERE id = $sub_id AND status = 'pending'");
     if ($check->num_rows > 0) {
         // 1. Re-calculate MCQ scores to ensure accuracy
         $conn->query("UPDATE student_answers sa 
@@ -75,7 +75,7 @@ include '../includes/header.php';
             SELECT e.id, e.title, e.total_marks, COUNT(s.id) as sub_count
             FROM exams e
             JOIN submissions s ON e.id = s.exam_id
-            WHERE s.status IN ('pending', 'evaluated')
+            WHERE s.status = 'pending'
             GROUP BY e.id
         ");
         if ($pending_exams->num_rows > 0):
@@ -95,6 +95,10 @@ include '../includes/header.php';
                                 onclick="return confirm('Publish all results for this exam?')">
                                 <i class="fas fa-paper-plane" style="margin-right:5px;"></i> Publish All
                             </a>
+                            <a href="manual-grading.php?exam_id=<?php echo $exam['id']; ?>" class="btn"
+                                style="padding:6px 15px;font-size:0.8rem;width:auto;background:#eef2ff;color:var(--primary-color);text-decoration:none;">
+                                <i class="fas fa-pen" style="margin-right:5px;"></i> Grade Coding
+                            </a>
                         </div>
                     </div>
                     <!-- Per-student score preview -->
@@ -103,7 +107,7 @@ include '../includes/header.php';
                             <tr style="background:#f1f5f9;text-align:left;">
                                 <th style="padding:10px 15px;font-size:0.8rem;color:var(--text-muted);">Student</th>
                                 <th style="padding:10px 15px;font-size:0.8rem;color:var(--text-muted);">Answers Saved</th>
-                                <th style="padding:10px 15px;font-size:0.8rem;color:var(--text-muted);">Score Preview</th>
+                                <th style="padding:10px 15px;font-size:0.8rem;color:var(--text-muted);">MCQ Correct</th>
                                 <th style="padding:10px 15px;font-size:0.8rem;color:var(--text-muted);">Submitted At</th>
                                 <th style="padding:10px 15px;font-size:0.8rem;color:var(--text-muted);">Status</th>
                                 <th style="padding:10px 15px;font-size:0.8rem;color:var(--text-muted);">Action</th>
@@ -112,15 +116,14 @@ include '../includes/header.php';
                         <tbody>
                             <?php
                             $students = $conn->query("
-                    SELECT s.id as sub_id, s.started_at, s.status, u.full_name,
+                    SELECT s.id as sub_id, s.started_at, u.full_name,
                            COUNT(sa.id) as answers_saved,
-                           SUM(sa.is_correct) as total_correct,
-                           SUM(sa.marks_obtained) as current_score
+                           SUM(CASE WHEN sa.selected_option = q.correct_option AND q.type='MCQ' THEN 1 ELSE 0 END) as mcq_correct
                     FROM submissions s
                     JOIN users u ON s.student_id = u.id
                     LEFT JOIN student_answers sa ON sa.submission_id = s.id
                     LEFT JOIN questions q ON q.id = sa.question_id
-                    WHERE s.exam_id = {$exam['id']} AND s.status IN ('pending', 'evaluated')
+                    WHERE s.exam_id = {$exam['id']} AND s.status = 'pending'
                     GROUP BY s.id
                     ORDER BY u.full_name ASC
                 ");
@@ -132,17 +135,14 @@ include '../includes/header.php';
                                     </td>
                                     <td style="padding:12px 15px;"><?php echo $stu['answers_saved']; ?> answers</td>
                                     <td style="padding:12px 15px;color:var(--secondary-color);font-weight:600;">
-                                        <?php echo (float) ($stu['current_score'] ?? 0); ?> marks
-                                        <small
-                                            style="display:block;font-size:0.7rem;color:var(--text-muted);font-weight:400;">(<?php echo $stu['total_correct']; ?>
-                                            correct)</small>
+                                        <?php echo $stu['mcq_correct']; ?> correct
                                     </td>
                                     <td style="padding:12px 15px;font-size:0.85rem;color:var(--text-muted);">
                                         <?php echo date('d M Y, h:i A', strtotime($stu['started_at'])); ?>
                                     </td>
                                     <td style="padding:12px 15px;">
                                         <span
-                                            style="background:<?php echo $stu['status'] == 'evaluated' ? '#dcfce7' : '#fef3c7'; ?>;color:<?php echo $stu['status'] == 'evaluated' ? '#166534' : '#92400e'; ?>;padding:3px 10px;border-radius:20px;font-size:0.75rem;font-weight:600;"><?php echo ucfirst($stu['status'] ?? 'pending'); ?></span>
+                                            style="background:#fef3c7;color:#92400e;padding:3px 10px;border-radius:20px;font-size:0.75rem;font-weight:600;">Pending</span>
                                     </td>
                                     <td style="padding:12px 15px;">
                                         <a href="?publish_submission=<?php echo $stu['sub_id']; ?>" class="btn btn-primary"

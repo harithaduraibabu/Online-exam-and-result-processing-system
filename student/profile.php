@@ -59,8 +59,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_password'])) {
     $res = $conn->query("SELECT password FROM users WHERE id = $user_id");
     $user = $res->fetch_assoc();
 
-    if ($current_pass === $user['password']) {
-        $conn->query("UPDATE users SET password = '$new_pass' WHERE id = $user_id");
+    if (password_verify($current_pass, $user['password']) || $current_pass === $user['password']) {
+        $hashed = password_hash($new_pass, PASSWORD_DEFAULT);
+        $conn->query("UPDATE users SET password = '$hashed' WHERE id = $user_id");
         $success = "Password updated successfully.";
     } else {
         $error = "Current password is incorrect.";

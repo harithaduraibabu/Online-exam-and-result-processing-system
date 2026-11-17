@@ -4,12 +4,28 @@ require_once 'includes/db_connect.php';
 
 // Redirect if already logged in
 if (isset($_SESSION['user_id'])) {
-    if ($_SESSION['role'] == 'admin') {
-        header("Location: admin/index.php");
+    $uid = (int) $_SESSION['user_id'];
+    $check_stmt = $conn->prepare("SELECT id, full_name, email, role FROM users WHERE id = ?");
+    $check_stmt->bind_param("i", $uid);
+    $check_stmt->execute();
+    $check_res = $check_stmt->get_result();
+
+    if ($check_res && $check_res->num_rows === 1) {
+        $u = $check_res->fetch_assoc();
+        $_SESSION['full_name'] = $u['full_name'];
+        $_SESSION['role'] = $u['role'];
+        $_SESSION['email'] = $u['email'];
+        if ($u['role'] == 'admin') {
+            header("Location: admin/index.php");
+        } else {
+            header("Location: student/index.php");
+        }
+        exit();
     } else {
-        header("Location: student/index.php");
+        session_unset();
+        session_destroy();
+        session_start();
     }
-    exit();
 }
 
 $error = "";
@@ -26,7 +42,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['login'])) {
 
     if ($result->num_rows == 1) {
         $user = $result->fetch_assoc();
-        if ($password === $user['password']) {
+        if (password_verify($password, $user['password']) || $password === $user['password']) {
+            if ($password === $user['password']) {
+                $new_hash = password_hash($password, PASSWORD_DEFAULT);
+                $conn->query("UPDATE users SET password = '$new_hash' WHERE id = " . $user['id']);
+            }
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['full_name'] = $user['full_name'];
             $_SESSION['email'] = $email;
@@ -55,7 +75,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['login'])) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login | Exam Portal</title>
     <link rel="stylesheet" href="assets/css/style.css">
-    <script src="assets/js/dynamic.js" defer></script>
     <style>
         /* Animated Background Blobs */
         .bg-blob {
@@ -152,11 +171,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['login'])) {
             <form action="" method="POST">
                 <div class="form-group">
                     <label>Email Address</label>
-                    <input type="email" name="email" class="form-control" placeholder="name@gmail.com" required>
+                    <input type="email" name="email" class="form-control" placeholder="name@example.com" required>
                 </div>
                 <div class="form-group">
                     <label>Password</label>
-                    <input type="password" name="password" class="form-control" required>
+                    <input type="password" name="password" class="form-control" placeholder="••••••••" required>
                 </div>
                 <button type="submit" name="login" class="btn btn-primary">Login Now</button>
             </form>
